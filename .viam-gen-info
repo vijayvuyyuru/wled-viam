@@ -1,0 +1,13 @@
+{
+  "module_name": "wled",
+  "visibility": "public",
+  "namespace": "vijayvuyyuru",
+  "language": "go",
+  "resource_type": "service",
+  "resource_subtype": "generic",
+  "model_name": "wled",
+  "initialize_git": false,
+  "generator_version": "0.1.0",
+  "generated_on": "2026-04-03T02:41:33.709422Z",
+  "module_readme_link": "README.md"
+}
