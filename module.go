@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"go.viam.com/rdk/logging"
@@ -56,6 +57,7 @@ type wledWled struct {
 	wledBase   string
 	httpClient *http.Client
 	sacn       *sacnState
+	sacnMu     sync.Mutex
 
 	cancelCtx  context.Context
 	cancelFunc func()

@@ -41,14 +41,17 @@ func initSACN(wledIP string) (*sacnState, error) {
 // sendFrame parses ring pixel arrays from the command and sends each ring's
 // RGB data to the corresponding sACN universe channel.
 func (s *wledWled) sendFrame(ctx context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {
+	s.sacnMu.Lock()
 	if s.sacn == nil {
 		sacnState, err := initSACN(s.cfg.WledIP)
 		if err != nil {
+			s.sacnMu.Unlock()
 			return nil, fmt.Errorf("lazy sACN init: %w", err)
 		}
 		s.sacn = sacnState
 		s.logger.Infow("sACN transmitter initialized on first frame")
 	}
+	s.sacnMu.Unlock()
 
 	ringsVal, ok := cmd["rings"]
 	if !ok {
@@ -90,6 +93,8 @@ func (s *wledWled) sendFrame(ctx context.Context, cmd map[string]interface{}) (m
 // stopSACN tears down the sACN transmitter so it stops overriding HTTP effects.
 // Safe to call when sACN is already nil.
 func (s *wledWled) stopSACN() {
+	s.sacnMu.Lock()
+	defer s.sacnMu.Unlock()
 	if s.sacn == nil {
 		return
 	}
