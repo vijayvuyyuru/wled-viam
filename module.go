@@ -102,15 +102,10 @@ func NewWled(ctx context.Context, deps resource.Dependencies, name resource.Name
 		}
 	}
 
-	// Initialize sACN transmitter for per-pixel frame data (universes 1–3)
-	sacnState, err := initSACN(conf.WledIP)
-	if err != nil {
-		logger.Warnw("failed to initialize sACN transmitter", "error", err)
-	} else {
-		s.sacn = sacnState
-	}
+	// sACN transmitter is initialized lazily on the first "frame" command
+	// to avoid overriding HTTP-set effects (WLED gives sACN priority over HTTP)
 
-	logger.Infow("WLED module initialized", "base_url", s.wledBase, "sacn", s.sacn != nil)
+	logger.Infow("WLED module initialized", "base_url", s.wledBase)
 	return s, nil
 }
 
@@ -128,8 +123,10 @@ func (s *wledWled) DoCommand(ctx context.Context, cmd map[string]interface{}) (m
 
 		switch cmdStr {
 		case "off":
+			s.stopSACN()
 			return s.PostState(ctx, map[string]interface{}{"on": false})
 		case "on":
+			s.stopSACN()
 			return s.PostState(ctx, map[string]interface{}{"on": true})
 		case "status":
 			return s.GetState(ctx)
@@ -142,6 +139,7 @@ func (s *wledWled) DoCommand(ctx context.Context, cmd map[string]interface{}) (m
 	}
 
 	// Shape B — passthrough: forward the entire map to WLED
+	s.stopSACN()
 	return s.PostState(ctx, cmd)
 }
 

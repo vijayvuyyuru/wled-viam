@@ -42,7 +42,12 @@ func initSACN(wledIP string) (*sacnState, error) {
 // RGB data to the corresponding sACN universe channel.
 func (s *wledWled) sendFrame(ctx context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {
 	if s.sacn == nil {
-		return nil, fmt.Errorf("sACN transmitter not initialized")
+		sacnState, err := initSACN(s.cfg.WledIP)
+		if err != nil {
+			return nil, fmt.Errorf("lazy sACN init: %w", err)
+		}
+		s.sacn = sacnState
+		s.logger.Infow("sACN transmitter initialized on first frame")
 	}
 
 	ringsVal, ok := cmd["rings"]
@@ -82,7 +87,18 @@ func (s *wledWled) sendFrame(ctx context.Context, cmd map[string]interface{}) (m
 	return map[string]interface{}{"status": "ok"}, nil
 }
 
-// closeSACN closes all universe channels and stops the transmitter.
+// stopSACN tears down the sACN transmitter so it stops overriding HTTP effects.
+// Safe to call when sACN is already nil.
+func (s *wledWled) stopSACN() {
+	if s.sacn == nil {
+		return
+	}
+	s.sacn.close()
+	s.sacn = nil
+	s.logger.Infow("sACN transmitter stopped, HTTP effects take priority")
+}
+
+// close shuts down all universe channels and stops the transmitter.
 func (st *sacnState) close() {
 	for i := range st.ch {
 		if st.ch[i] != nil {
