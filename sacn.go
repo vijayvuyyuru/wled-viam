@@ -39,56 +39,20 @@ func initSACN(wledIP string) (*sacnState, error) {
 	return &sacnState{trans: trans, ch: channels}, nil
 }
 
-// enterSACNMode sets lor=1 on WLED so it accepts sACN realtime data.
-// Only sends the HTTP request if not already in sACN mode.
-func (s *wledWled) enterSACNMode(ctx context.Context) {
-	s.sacnMu.Lock()
-	alreadyActive := s.sacnActive
-	s.sacnActive = true
-	s.sacnMu.Unlock()
-
-	if !alreadyActive {
-		if _, err := s.PostState(ctx, map[string]interface{}{"lor": 1}); err != nil {
-			s.logger.Warnw("failed to set lor=1", "error", err)
-		}
-		s.logger.Infow("entered sACN mode (lor=1)")
-	}
-}
-
-// exitSACNMode sends black frames on all universes and sets lor=0 so WLED
-// returns to HTTP effect mode. Only acts if currently in sACN mode.
-func (s *wledWled) exitSACNMode(ctx context.Context) {
-	s.sacnMu.Lock()
-	if !s.sacnActive {
-		s.sacnMu.Unlock()
-		return
-	}
-	// Send black frames to clear any sACN pixel data
-	if s.sacn != nil {
-		black := make([]byte, 432) // 144 pixels × 3 channels
-		for i := 0; i < numUniverses; i++ {
-			s.sacn.ch[i] <- black
-		}
-	}
-	s.sacnActive = false
-	s.sacnMu.Unlock()
-
-	// Set lor=0 so WLED immediately accepts HTTP commands
-	if _, err := s.PostState(ctx, map[string]interface{}{"lor": 0}); err != nil {
-		s.logger.Warnw("failed to set lor=0", "error", err)
-	}
-	s.logger.Infow("exited sACN mode (lor=0)")
-}
-
-// sendFrame parses ring pixel arrays from the command and sends each ring's
-// RGB data to the corresponding sACN universe channel.
+// sendFrame lazily initializes the sACN transmitter on first use (mutex-protected),
+// then sends per-pixel RGB data to the corresponding universe channels.
 func (s *wledWled) sendFrame(ctx context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {
+	s.sacnMu.Lock()
 	if s.sacn == nil {
-		return nil, fmt.Errorf("sACN transmitter not initialized")
+		st, err := initSACN(s.cfg.WledIP)
+		if err != nil {
+			s.sacnMu.Unlock()
+			return nil, fmt.Errorf("sACN init: %w", err)
+		}
+		s.sacn = st
+		s.logger.Infow("sACN transmitter initialized on first frame")
 	}
-
-	// Ensure WLED is in realtime mode
-	s.enterSACNMode(ctx)
+	s.sacnMu.Unlock()
 
 	ringsVal, ok := cmd["rings"]
 	if !ok {
@@ -124,6 +88,19 @@ func (s *wledWled) sendFrame(ctx context.Context, cmd map[string]interface{}) (m
 	}
 
 	return map[string]interface{}{"status": "ok"}, nil
+}
+
+// teardownSACN destroys the sACN transmitter so no keep-alive packets are sent.
+// This allows WLED to fall back to HTTP effect mode. Safe to call when nil.
+func (s *wledWled) teardownSACN() {
+	s.sacnMu.Lock()
+	defer s.sacnMu.Unlock()
+	if s.sacn == nil {
+		return
+	}
+	s.sacn.close()
+	s.sacn = nil
+	s.logger.Infow("sACN transmitter torn down")
 }
 
 // close shuts down all universe channels. Channels are closed sequentially
