@@ -54,10 +54,11 @@ type wledWled struct {
 	logger logging.Logger
 	cfg    *Config
 
-	wledBase   string
-	httpClient *http.Client
-	sacn       *sacnState
-	sacnMu     sync.Mutex
+	wledBase    string
+	httpClient  *http.Client
+	sacn        *sacnState
+	sacnMu      sync.Mutex
+	sacnActive  bool // true when WLED is in realtime/sACN mode
 
 	cancelCtx  context.Context
 	cancelFunc func()
@@ -104,10 +105,24 @@ func NewWled(ctx context.Context, deps resource.Dependencies, name resource.Name
 		}
 	}
 
-	// sACN transmitter is initialized lazily on the first "frame" command
-	// to avoid overriding HTTP-set effects (WLED gives sACN priority over HTTP)
+	// Initialize sACN transmitter eagerly. On startup, immediately set lor=0
+	// so WLED stays in HTTP mode despite receiving sACN keep-alive packets.
+	sacnState, err := initSACN(conf.WledIP)
+	if err != nil {
+		logger.Warnw("failed to initialize sACN transmitter", "error", err)
+	} else {
+		s.sacn = sacnState
+		// Send black frames + lor=0 so keep-alives don't lock WLED into realtime mode
+		black := make([]byte, 432)
+		for i := 0; i < numUniverses; i++ {
+			s.sacn.ch[i] <- black
+		}
+		if _, err := s.PostState(ctx, map[string]interface{}{"lor": 0}); err != nil {
+			logger.Warnw("failed to set lor=0 on startup", "error", err)
+		}
+	}
 
-	logger.Infow("WLED module initialized", "base_url", s.wledBase)
+	logger.Infow("WLED module initialized", "base_url", s.wledBase, "sacn", s.sacn != nil)
 	return s, nil
 }
 
@@ -125,11 +140,11 @@ func (s *wledWled) DoCommand(ctx context.Context, cmd map[string]interface{}) (m
 
 		switch cmdStr {
 		case "off":
-			s.stopSACN()
-			return s.PostState(ctx, map[string]interface{}{"on": false})
+			s.exitSACNMode(ctx)
+			return s.PostState(ctx, map[string]interface{}{"on": false, "lor": 0})
 		case "on":
-			s.stopSACN()
-			return s.PostState(ctx, map[string]interface{}{"on": true})
+			s.exitSACNMode(ctx)
+			return s.PostState(ctx, map[string]interface{}{"on": true, "lor": 0})
 		case "status":
 			return s.GetState(ctx)
 		case "frame":
@@ -141,7 +156,8 @@ func (s *wledWled) DoCommand(ctx context.Context, cmd map[string]interface{}) (m
 	}
 
 	// Shape B — passthrough: forward the entire map to WLED
-	s.stopSACN()
+	s.exitSACNMode(ctx)
+	cmd["lor"] = 0
 	return s.PostState(ctx, cmd)
 }
 
@@ -150,9 +166,12 @@ func (s *wledWled) Status(ctx context.Context) (map[string]interface{}, error) {
 }
 
 func (s *wledWled) Close(context.Context) error {
+	s.sacnMu.Lock()
 	if s.sacn != nil {
 		s.sacn.close()
+		s.sacn = nil
 	}
+	s.sacnMu.Unlock()
 	s.cancelFunc()
 	return nil
 }
