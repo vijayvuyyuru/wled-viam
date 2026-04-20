@@ -92,8 +92,7 @@ func (s *wledWled) sendFrame(ctx context.Context, cmd map[string]interface{}) (m
 	parseDur := time.Since(parseStart)
 	totalDur := time.Since(frameStart)
 
-	// Parseable format: FRAME_TIMING,wled_sacn,parse_ms,total_ms
-	s.logger.Debugf("FRAME_TIMING,wled_sacn,%d,%d", parseDur.Milliseconds(), totalDur.Milliseconds())
+	s.logger.Debugw("FRAME_TIMING,wled_sacn", "parse_ms", parseDur.Milliseconds(), "total_ms", totalDur.Milliseconds())
 
 	return map[string]interface{}{"status": "ok"}, nil
 }
