@@ -54,6 +54,8 @@ func (s *wledWled) sendFrame(ctx context.Context, cmd map[string]interface{}) (m
 	}
 	s.sacnMu.Unlock()
 
+	frameStart := time.Now()
+
 	ringsVal, ok := cmd["rings"]
 	if !ok {
 		return nil, fmt.Errorf("frame command missing \"rings\" key")
@@ -63,6 +65,7 @@ func (s *wledWled) sendFrame(ctx context.Context, cmd map[string]interface{}) (m
 		return nil, fmt.Errorf("\"rings\" must be a map, got %T", ringsVal)
 	}
 
+	parseStart := time.Now()
 	for i := 0; i < numUniverses; i++ {
 		key := fmt.Sprintf("%d", i)
 		ringVal, ok := rings[key]
@@ -86,6 +89,11 @@ func (s *wledWled) sendFrame(ctx context.Context, cmd map[string]interface{}) (m
 
 		s.sacn.ch[i] <- dmx
 	}
+	parseDur := time.Since(parseStart)
+	totalDur := time.Since(frameStart)
+
+	// Parseable format: FRAME_TIMING,wled_sacn,parse_ms,total_ms
+	s.logger.Debugf("FRAME_TIMING,wled_sacn,%d,%d", parseDur.Milliseconds(), totalDur.Milliseconds())
 
 	return map[string]interface{}{"status": "ok"}, nil
 }

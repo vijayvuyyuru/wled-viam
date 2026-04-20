@@ -125,10 +125,10 @@ func (s *wledWled) DoCommand(ctx context.Context, cmd map[string]interface{}) (m
 
 		switch cmdStr {
 		case "off":
-			s.teardownSACN()
+			// Don't tear down sACN — the next visualizer might need it.
+			// Just turn off the LEDs via HTTP.
 			return s.PostState(ctx, map[string]interface{}{"on": false})
 		case "on":
-			s.teardownSACN()
 			return s.PostState(ctx, map[string]interface{}{"on": true})
 		case "status":
 			return s.GetState(ctx)
