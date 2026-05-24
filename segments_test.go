@@ -1,8 +1,18 @@
 package wled
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"go.viam.com/rdk/logging"
 )
 
 func TestValidateSegments(t *testing.T) {
@@ -123,5 +133,120 @@ func TestValidateSegments(t *testing.T) {
 				t.Fatalf("expected error containing %q, got: %v", tt.wantErr, err)
 			}
 		})
+	}
+}
+
+// newFakeWLED stands up an httptest.Server that mimics WLED's /json/state endpoint.
+// It records every POST body so tests can assert on them.
+func newFakeWLED(t *testing.T) (*httptest.Server, *[]map[string]interface{}) {
+	t.Helper()
+	var (
+		mu       sync.Mutex
+		captured []map[string]interface{}
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/json/state" {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		var parsed map[string]interface{}
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		captured = append(captured, parsed)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &captured
+}
+
+// newTestWled returns a *wledWled pointed at the given fake server, with the
+// configured segments. No sACN state is touched.
+func newTestWled(t *testing.T, baseURL string, segs []SegmentConfig) *wledWled {
+	t.Helper()
+	stripped := strings.TrimPrefix(baseURL, "http://")
+	host := stripped
+	port := 80
+	if i := strings.LastIndex(stripped, ":"); i >= 0 {
+		host = stripped[:i]
+		fmt.Sscanf(stripped[i+1:], "%d", &port)
+	}
+	return &wledWled{
+		logger:     logging.NewTestLogger(t),
+		cfg:        &Config{WledIP: host, WledPort: port, Segments: segs},
+		wledBase:   baseURL,
+		httpClient: &http.Client{Timeout: 5 * time.Second},
+	}
+}
+
+func TestApplySegmentConfig(t *testing.T) {
+	srv, captured := newFakeWLED(t)
+
+	segs := []SegmentConfig{
+		{ID: 0, Start: 0, Stop: 144},
+		{ID: 1, Start: 144, Stop: 288, Rev: true},
+		{ID: 2, Start: 288, Stop: 432, Grp: 2, Spc: 1},
+	}
+	s := newTestWled(t, srv.URL, segs)
+
+	if err := s.applySegmentConfig(context.Background()); err != nil {
+		t.Fatalf("applySegmentConfig: %v", err)
+	}
+
+	if len(*captured) != 1 {
+		t.Fatalf("expected 1 POST, got %d", len(*captured))
+	}
+	payload, ok := (*captured)[0]["seg"].([]interface{})
+	if !ok {
+		t.Fatalf("expected seg array in POST body, got %T", (*captured)[0]["seg"])
+	}
+
+	// Three configured segments + (maxWLEDSegments - 3) deletion entries.
+	wantTotal := maxWLEDSegments
+	if len(payload) != wantTotal {
+		t.Fatalf("expected %d seg entries, got %d", wantTotal, len(payload))
+	}
+
+	first := payload[0].(map[string]interface{})
+	if first["id"].(float64) != 0 || first["start"].(float64) != 0 || first["stop"].(float64) != 144 {
+		t.Errorf("seg 0 wrong: %v", first)
+	}
+	if first["grp"].(float64) != 1 { // unset grp normalizes to 1
+		t.Errorf("seg 0 grp expected 1, got %v", first["grp"])
+	}
+	if first["rev"].(bool) != false {
+		t.Errorf("seg 0 rev expected false, got %v", first["rev"])
+	}
+
+	second := payload[1].(map[string]interface{})
+	if second["rev"].(bool) != true {
+		t.Errorf("seg 1 rev expected true, got %v", second["rev"])
+	}
+
+	third := payload[2].(map[string]interface{})
+	if third["grp"].(float64) != 2 {
+		t.Errorf("seg 2 grp expected 2, got %v", third["grp"])
+	}
+	if third["spc"].(float64) != 1 {
+		t.Errorf("seg 2 spc expected 1, got %v", third["spc"])
+	}
+
+	for i := 3; i < maxWLEDSegments; i++ {
+		entry := payload[i].(map[string]interface{})
+		if entry["id"].(float64) != float64(i) {
+			t.Errorf("deletion entry %d: wrong id %v", i, entry["id"])
+		}
+		if entry["stop"].(float64) != 0 {
+			t.Errorf("deletion entry %d: stop expected 0, got %v", i, entry["stop"])
+		}
 	}
 }

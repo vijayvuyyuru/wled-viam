@@ -1,6 +1,7 @@
 package wled
 
 import (
+	"context"
 	"fmt"
 	"sort"
 )
@@ -74,5 +75,38 @@ func validateSegments(segs []SegmentConfig) error {
 		}
 	}
 
+	return nil
+}
+
+// applySegmentConfig pushes the configured segments to the device and zeroes
+// out (deletes) any segment IDs above the configured count up to the firmware
+// limit. One HTTP POST handles the whole reconciliation; deleting a
+// nonexistent segment is a no-op on WLED's side.
+func (s *wledWled) applySegmentConfig(ctx context.Context) error {
+	segs := s.cfg.Segments
+	payload := make([]map[string]interface{}, 0, maxWLEDSegments)
+	for _, seg := range segs {
+		grp := seg.Grp
+		if grp == 0 {
+			grp = 1 // WLED default; sent explicitly so device state is deterministic
+		}
+		payload = append(payload, map[string]interface{}{
+			"id":    seg.ID,
+			"start": seg.Start,
+			"stop":  seg.Stop,
+			"rev":   seg.Rev,
+			"grp":   grp,
+			"spc":   seg.Spc,
+		})
+	}
+	for id := len(segs); id < maxWLEDSegments; id++ {
+		payload = append(payload, map[string]interface{}{
+			"id":   id,
+			"stop": 0,
+		})
+	}
+	if _, err := s.PostState(ctx, map[string]interface{}{"seg": payload}); err != nil {
+		return fmt.Errorf("apply segment config: %w", err)
+	}
 	return nil
 }
