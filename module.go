@@ -23,10 +23,11 @@ func init() {
 }
 
 type Config struct {
-	WledIP      string  `json:"wled_ip"`
-	WledPort    int     `json:"wled_port,omitempty"`
-	Brightness  float64 `json:"brightness,omitempty"`
-	HTTPTimeout float64 `json:"http_timeout,omitempty"`
+	WledIP      string          `json:"wled_ip"`
+	WledPort    int             `json:"wled_port,omitempty"`
+	Brightness  float64         `json:"brightness,omitempty"`
+	HTTPTimeout float64         `json:"http_timeout,omitempty"`
+	Segments    []SegmentConfig `json:"segments"`
 }
 
 // Validate ensures all parts of the config are valid and important fields exist.
