@@ -145,6 +145,8 @@ func (s *wledWled) DoCommand(ctx context.Context, cmd map[string]interface{}) (m
 		case "frame":
 			// Shape C — per-pixel frame via sACN
 			return s.sendFrame(ctx, cmd)
+		case "get_segments":
+			return s.getSegments(), nil
 		default:
 			return nil, fmt.Errorf("unknown command: %q", cmdStr)
 		}

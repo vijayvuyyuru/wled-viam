@@ -286,3 +286,32 @@ func TestGetSegments(t *testing.T) {
 		t.Errorf("seg 1 explicit fields wrong: %v", second)
 	}
 }
+
+func TestDoCommand_GetSegments(t *testing.T) {
+	segs := []SegmentConfig{
+		{ID: 0, Start: 0, Stop: 100},
+		{ID: 1, Start: 100, Stop: 250},
+	}
+	s := &wledWled{
+		logger: logging.NewTestLogger(t),
+		cfg:    &Config{Segments: segs},
+	}
+
+	out, err := s.DoCommand(context.Background(), map[string]interface{}{"command": "get_segments"})
+	if err != nil {
+		t.Fatalf("DoCommand returned error: %v", err)
+	}
+	list, ok := out["segments"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("expected segments list, got %T", out["segments"])
+	}
+	if len(list) != 2 {
+		t.Fatalf("expected 2 segments, got %d", len(list))
+	}
+	if list[0]["len"] != 100 {
+		t.Errorf("seg 0 len expected 100, got %v", list[0]["len"])
+	}
+	if list[1]["len"] != 150 {
+		t.Errorf("seg 1 len expected 150, got %v", list[1]["len"])
+	}
+}
