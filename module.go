@@ -108,6 +108,14 @@ func NewWled(ctx context.Context, deps resource.Dependencies, name resource.Name
 		}
 	}
 
+	// Reconcile segment geometry. WLED loses segments on power cycle and
+	// after firmware resets, so the Viam module is the declared source of
+	// truth — push configured segments on every start. Failure is logged
+	// and tolerated (next reload retries) to match the brightness pattern.
+	if err := s.applySegmentConfig(ctx); err != nil {
+		logger.Warnw("failed to apply segment config", "error", err)
+	}
+
 	// sACN transmitter is lazily initialized on first frame command
 	// and torn down when switching to HTTP. No keep-alive interference.
 
