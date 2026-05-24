@@ -110,3 +110,27 @@ func (s *wledWled) applySegmentConfig(ctx context.Context) error {
 	}
 	return nil
 }
+
+// getSegments returns the cached segment config in DoCommand-friendly shape.
+// Does not query the device — the Viam config is the declared source of truth
+// and applySegmentConfig keeps the device aligned with it. Consumers calling
+// this on every resource start get a stable, infallible read.
+func (s *wledWled) getSegments() map[string]interface{} {
+	segs := make([]map[string]interface{}, 0, len(s.cfg.Segments))
+	for _, seg := range s.cfg.Segments {
+		grp := seg.Grp
+		if grp == 0 {
+			grp = 1
+		}
+		segs = append(segs, map[string]interface{}{
+			"id":    seg.ID,
+			"start": seg.Start,
+			"stop":  seg.Stop,
+			"len":   seg.Stop - seg.Start,
+			"rev":   seg.Rev,
+			"grp":   grp,
+			"spc":   seg.Spc,
+		})
+	}
+	return map[string]interface{}{"segments": segs}
+}

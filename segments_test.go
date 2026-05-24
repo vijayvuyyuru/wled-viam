@@ -250,3 +250,39 @@ func TestApplySegmentConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestGetSegments(t *testing.T) {
+	segs := []SegmentConfig{
+		{ID: 0, Start: 0, Stop: 144},
+		{ID: 1, Start: 144, Stop: 288, Rev: true, Grp: 2, Spc: 1},
+	}
+	s := &wledWled{
+		logger: logging.NewTestLogger(t),
+		cfg:    &Config{Segments: segs},
+	}
+
+	out := s.getSegments()
+	rawList, ok := out["segments"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("expected segments to be []map[string]interface{}, got %T", out["segments"])
+	}
+	if len(rawList) != 2 {
+		t.Fatalf("expected 2 segments, got %d", len(rawList))
+	}
+
+	first := rawList[0]
+	if first["id"] != 0 || first["start"] != 0 || first["stop"] != 144 || first["len"] != 144 {
+		t.Errorf("seg 0 wrong: %v", first)
+	}
+	if first["rev"] != false || first["grp"] != 1 || first["spc"] != 0 {
+		t.Errorf("seg 0 defaults wrong: %v", first)
+	}
+
+	second := rawList[1]
+	if second["len"] != 144 {
+		t.Errorf("seg 1 len wrong: %v", second["len"])
+	}
+	if second["rev"] != true || second["grp"] != 2 || second["spc"] != 1 {
+		t.Errorf("seg 1 explicit fields wrong: %v", second)
+	}
+}
