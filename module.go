@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -44,9 +45,42 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.WledIP == "" {
 		return nil, nil, fmt.Errorf("%s: wled_ip is required", path)
 	}
-	if err := cfg.validateSegments(); err != nil {
-		return nil, nil, fmt.Errorf("%s: %w", path, err)
+
+	if len(cfg.Segments) == 0 {
+		return nil, nil, fmt.Errorf("%s: segments must contain at least one entry", path)
 	}
+	if len(cfg.Segments) > maxWLEDSegments {
+		return nil, nil, fmt.Errorf("%s: segments count %d exceeds firmware limit %d", path, len(cfg.Segments), maxWLEDSegments)
+	}
+
+	seenIDs := make(map[int]bool, len(cfg.Segments))
+	for i, seg := range cfg.Segments {
+		if err := seg.Validate(); err != nil {
+			return nil, nil, fmt.Errorf("%s: segments[%d]: %w", path, i, err)
+		}
+		if seenIDs[seg.ID] {
+			return nil, nil, fmt.Errorf("%s: segments[%d]: duplicate id %d", path, i, seg.ID)
+		}
+		seenIDs[seg.ID] = true
+	}
+	for id := 0; id < len(cfg.Segments); id++ {
+		if !seenIDs[id] {
+			return nil, nil, fmt.Errorf("%s: segment ids must be contiguous starting at 0; missing id %d", path, id)
+		}
+	}
+
+	sorted := make([]SegmentConfig, len(cfg.Segments))
+	copy(sorted, cfg.Segments)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Start < sorted[j].Start })
+	for i := 1; i < len(sorted); i++ {
+		if sorted[i].Start < sorted[i-1].Stop {
+			return nil, nil, fmt.Errorf("%s: segments with ids %d and %d overlap (%d..%d vs %d..%d)",
+				path, sorted[i-1].ID, sorted[i].ID,
+				sorted[i-1].Start, sorted[i-1].Stop,
+				sorted[i].Start, sorted[i].Stop)
+		}
+	}
+
 	return nil, nil, nil
 }
 
