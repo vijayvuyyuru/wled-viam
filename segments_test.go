@@ -119,7 +119,8 @@ func TestValidateSegments(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateSegments(tt.segs)
+			cfg := &Config{Segments: tt.segs}
+			err := cfg.validateSegments()
 			if tt.wantErr == "" {
 				if err != nil {
 					t.Fatalf("expected no error, got: %v", err)

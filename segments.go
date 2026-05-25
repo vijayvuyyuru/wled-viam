@@ -27,7 +27,8 @@ type SegmentConfig struct {
 // startup sync: non-empty, unique contiguous IDs starting at 0, non-negative
 // and non-overlapping ranges, non-negative Grp/Spc, and within the
 // firmware's segment limit.
-func validateSegments(segs []SegmentConfig) error {
+func (cfg *Config) validateSegments() error {
+	segs := cfg.Segments
 	if len(segs) == 0 {
 		return fmt.Errorf("segments must contain at least one entry")
 	}

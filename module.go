@@ -44,7 +44,7 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.WledIP == "" {
 		return nil, nil, fmt.Errorf("%s: wled_ip is required", path)
 	}
-	if err := validateSegments(cfg.Segments); err != nil {
+	if err := cfg.validateSegments(); err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return nil, nil, nil
