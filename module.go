@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -23,10 +24,11 @@ func init() {
 }
 
 type Config struct {
-	WledIP      string  `json:"wled_ip"`
-	WledPort    int     `json:"wled_port,omitempty"`
-	Brightness  float64 `json:"brightness,omitempty"`
-	HTTPTimeout float64 `json:"http_timeout,omitempty"`
+	WledIP      string          `json:"wled_ip"`
+	WledPort    int             `json:"wled_port,omitempty"`
+	Brightness  float64         `json:"brightness,omitempty"`
+	HTTPTimeout float64         `json:"http_timeout,omitempty"`
+	Segments    []SegmentConfig `json:"segments"`
 }
 
 // Validate ensures all parts of the config are valid and important fields exist.
@@ -43,6 +45,42 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.WledIP == "" {
 		return nil, nil, fmt.Errorf("%s: wled_ip is required", path)
 	}
+
+	if len(cfg.Segments) == 0 {
+		return nil, nil, fmt.Errorf("%s: segments must contain at least one entry", path)
+	}
+	if len(cfg.Segments) > maxWLEDSegments {
+		return nil, nil, fmt.Errorf("%s: segments count %d exceeds firmware limit %d", path, len(cfg.Segments), maxWLEDSegments)
+	}
+
+	seenIDs := make(map[int]bool, len(cfg.Segments))
+	for i, seg := range cfg.Segments {
+		if err := seg.Validate(); err != nil {
+			return nil, nil, fmt.Errorf("%s: segments[%d]: %w", path, i, err)
+		}
+		if seenIDs[seg.ID] {
+			return nil, nil, fmt.Errorf("%s: segments[%d]: duplicate id %d", path, i, seg.ID)
+		}
+		seenIDs[seg.ID] = true
+	}
+	for id := 0; id < len(cfg.Segments); id++ {
+		if !seenIDs[id] {
+			return nil, nil, fmt.Errorf("%s: segment ids must be contiguous starting at 0; missing id %d", path, id)
+		}
+	}
+
+	sorted := make([]SegmentConfig, len(cfg.Segments))
+	copy(sorted, cfg.Segments)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Start < sorted[j].Start })
+	for i := 1; i < len(sorted); i++ {
+		if sorted[i].Start < sorted[i-1].Stop {
+			return nil, nil, fmt.Errorf("%s: segments with ids %d and %d overlap (%d..%d vs %d..%d)",
+				path, sorted[i-1].ID, sorted[i].ID,
+				sorted[i-1].Start, sorted[i-1].Stop,
+				sorted[i].Start, sorted[i].Stop)
+		}
+	}
+
 	return nil, nil, nil
 }
 
@@ -104,6 +142,14 @@ func NewWled(ctx context.Context, deps resource.Dependencies, name resource.Name
 		}
 	}
 
+	// Reconcile segment geometry. WLED loses segments on power cycle and
+	// after firmware resets, so the Viam module is the declared source of
+	// truth — push configured segments on every start. Failure is logged
+	// and tolerated (next reload retries) to match the brightness pattern.
+	if err := s.applySegmentConfig(ctx); err != nil {
+		logger.Warnw("failed to apply segment config", "error", err)
+	}
+
 	// sACN transmitter is lazily initialized on first frame command
 	// and torn down when switching to HTTP. No keep-alive interference.
 
@@ -133,6 +179,8 @@ func (s *wledWled) DoCommand(ctx context.Context, cmd map[string]interface{}) (m
 		case "frame":
 			// Shape C — per-pixel frame via sACN
 			return s.sendFrame(ctx, cmd)
+		case "get_segments":
+			return s.getSegments(), nil
 		default:
 			return nil, fmt.Errorf("unknown command: %q", cmdStr)
 		}
